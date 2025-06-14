@@ -1,3 +1,7 @@
+# This is a fork purely for my purposes, I have an adafruit matrix portal s3 that is hooked up to a 32x64 hub75 display that had issues blanking when using ledfx. I did a bit of lazy chatgpt and it now longer does that at the cost of performace (not very noticable). Here is the binary if someone else wants to try it: [firmware-adafruit_matrixportal_esp32s3_tinyUF2-blanking_fix.bin](./firmware-adafruit_matrixportal_esp32s3_tinyUF2-blanking_fix.bin)
+
+
+
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
   <a href="https://github.com/MoonModules/WLED/releases"><img src="https://img.shields.io/github/release/MoonModules/WLED.svg?style=flat-square"></a>
