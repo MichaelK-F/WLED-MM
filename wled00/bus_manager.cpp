@@ -525,17 +525,6 @@ void IRAM_ATTR_YN BusNetwork::setPixelColor(uint16_t pix, uint32_t c) {
         _data[offset] = R(c); _data[offset+1] = G(c); _data[offset+2] = B(c);
         if (_rgbw) _data[offset+3] = W(c);
     }
-
-#ifdef WLED_ENABLE_HUB75MATRIX
-    // If a HUB75 matrix bus exists, update its buffer as well
-    for (uint8_t i = 0; i < busses.getNumBusses(); i++) {
-        Bus* bus = busses.getBus(i);
-        if (bus && bus->getType() >= TYPE_HUB75MATRIX && bus->getType() <= (TYPE_HUB75MATRIX + 10)) {
-            // Map pix to matrix pixel if needed (assuming 1:1 mapping for DDP)
-            bus->setPixelColor(pix, c); // always write, even if c==0 (black)
-        }
-    }
-#endif
 }
 
 uint32_t IRAM_ATTR_YN BusNetwork::getPixelColor(uint16_t pix) const {
@@ -912,12 +901,12 @@ BusHub75Matrix::BusHub75Matrix(BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWh
       DEBUG_PRINTLN("MatrixPanel_I2S_DMA deleting old driver!");
       activeDisplay->stopDMAoutput();
       delay(28);
-      //#if !defined(CONFIG_IDF_TARGET_ESP32)  // prevent crash
+      //#if !defined(CONFIG_IDF_TARGET_ESP32S3)  // prevent crash
       delete activeDisplay;
       //#endif
       activeDisplay = nullptr;
       activeFourScanPanel = nullptr;
-      #if defined(CONFIG_IDF_TARGET_ESP32)  // runtime reconfiguration is not working on -S3
+      #if defined(CONFIG_IDF_TARGET_ESP32S3)  // runtime reconfiguration is not working on -S3
       USER_PRINTLN("\n\n****** MatrixPanel_I2S_DMA !KABOOM WARNING! Reboot needed to change driver options ***********\n");
       errorFlag = ERR_REBOOT_NEEDED;
       #endif
@@ -1074,9 +1063,10 @@ void __attribute__((hot)) IRAM_ATTR BusHub75Matrix::setPixelColor(uint16_t pix, 
 
   if (_ledBuffer) {
     CRGB fastled_col = CRGB(c);
-    // Always update the buffer, even if color is black
-    _ledBuffer[pix] = fastled_col;
-    setBitInArray(_ledsDirty, pix, true);  // flag pixel as "dirty"
+    if (_ledBuffer[pix] != fastled_col) {
+      _ledBuffer[pix] = fastled_col;
+      setBitInArray(_ledsDirty, pix, true);  // flag pixel as "dirty"
+    }
   }
   #if 0
   // !! this code is not used any more !!
@@ -1138,28 +1128,35 @@ void __attribute__((hot)) IRAM_ATTR BusHub75Matrix::show(void) {
     // write out buffered LEDs
     VirtualMatrixPanel*  fourScanPanel = BusHub75Matrix::activeFourScanPanel;
     bool isFourScan = (fourScanPanel != nullptr);
+    //if (isFourScan) fourScanPanel->setRotation(0);
     unsigned height = isFourScan ? fourScanPanel->height() : display->height();
     unsigned width = _panelWidth;
 
-    // Always write all pixels, including black, every frame
+    // Cache pointers to LED array and bitmask array, to avoid repeated accesses
+    const byte* ledsDirty = _ledsDirty;
     const CRGB* ledBuffer = _ledBuffer;
-    size_t pix = 0;
+
+    //while(!previousBufferFree) delay(1);   // experimental - Wait before we allow any writing to the buffer. Stop flicker.
+
+    size_t pix = 0; // running pixel index
     for (int y=0; y<height; y++) for (int x=0; x<width; x++) {
-      #ifndef NO_CIE1931
-      uint32_t c = uint32_t(ledBuffer[pix]) & 0x00FFFFFF;
-      c = unGamma24(c);
-      uint8_t r = R(c);
-      uint8_t g = G(c);
-      uint8_t b = B(c);
-      #else
-      const CRGB c = ledBuffer[pix];
-      uint8_t r = c.r;
-      uint8_t g = c.g;
-      uint8_t b = c.b;
-      #endif
-      if (isFourScan) fourScanPanel->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
-      else display->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
-      pix++;
+      if (getBitFromArray(ledsDirty, pix) == true) {        // only repaint the "dirty"  pixels
+        #ifndef NO_CIE1931
+        uint32_t c = uint32_t(ledBuffer[pix]) & 0x00FFFFFF; // get RGB color, removing FastLED "alpha" component 
+        c = unGamma24(c); // to use the driver linear brightness feature, we first need to undo WLED gamma correction
+        uint8_t r = R(c);
+        uint8_t g = G(c);
+        uint8_t b = B(c);
+        #else
+        const CRGB c = ledBuffer[pix];  // we stay on CRGB, instead of packing/unpacking the color value to uint32_t
+        uint8_t r = c.r;
+        uint8_t g = c.g;
+        uint8_t b = c.b;
+        #endif
+        if (isFourScan) fourScanPanel->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
+        else display->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
+      }
+      pix ++;
     }
     setBitArray(_ledsDirty, _len, false);  // buffer shown - reset all dirty bits
   }
@@ -1170,7 +1167,7 @@ void BusHub75Matrix::cleanup() {
   VirtualMatrixPanel*  fourScanPanel = BusHub75Matrix::activeFourScanPanel;
   if (display) display->clearScreen();
 
-#if !defined(CONFIG_IDF_TARGET_ESP32) // S3: don't stop, as we want to re-use the driver later
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) // S3: don't stop, as we want to re-use the driver later
   if (display && _valid) display->stopDMAoutput();  // terminate DMA driver (display goes black)
   _panelWidth = 0;
   USER_PRINTLN("HUB75 output ended.");
@@ -1182,7 +1179,7 @@ void BusHub75Matrix::cleanup() {
   deallocatePins();
   _len = 0;
   //if (fourScanPanel != nullptr) delete fourScanPanel;  // warning: deleting object of polymorphic class type 'VirtualMatrixPanel' which has non-virtual destructor might cause undefined behavior
-#if !defined(CONFIG_IDF_TARGET_ESP32) // S3: don't delete, as we want to re-use the driver later
+#if !defined(CONFIG_IDF_TARGET_ESP32S3) // S3: don't delete, as we want to re-use the driver later
   if (display) delete display;
   activeDisplay = nullptr;
   activeFourScanPanel = nullptr;

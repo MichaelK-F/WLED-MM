@@ -131,16 +131,4 @@ void ESPAsyncE131::parsePacket(AsyncUDPPacket _packet) {
   if (!error) {
     _callback(sbuff, _packet.remoteIP(), protocol);
   }
-
-  if (error && _packet.localPort() == DDP_DEFAULT_PORT) { //DDP packet
-    // After updating all pixels, force a show on HUB75 matrix
-    #ifdef WLED_ENABLE_HUB75MATRIX
-    for (uint8_t i = 0; i < busses.getNumBusses(); i++) {
-      Bus* bus = busses.getBus(i);
-      if (bus && bus->getType() >= TYPE_HUB75MATRIX && bus->getType() <= (TYPE_HUB75MATRIX + 10)) {
-        bus->show(); // force full refresh, including black pixels
-      }
-    }
-    #endif
-  }
 }
