@@ -1122,43 +1122,35 @@ void __attribute__((hot)) IRAM_ATTR BusHub75Matrix::show(void) {
   if (!_valid) return;
   MatrixPanel_I2S_DMA* display = BusHub75Matrix::activeDisplay;
   if (!display) return;
+
   display->setBrightness(_bri);
 
   if (_ledBuffer) {
-    // write out buffered LEDs
-    VirtualMatrixPanel*  fourScanPanel = BusHub75Matrix::activeFourScanPanel;
+    VirtualMatrixPanel* fourScanPanel = BusHub75Matrix::activeFourScanPanel;
     bool isFourScan = (fourScanPanel != nullptr);
-    //if (isFourScan) fourScanPanel->setRotation(0);
     unsigned height = isFourScan ? fourScanPanel->height() : display->height();
     unsigned width = _panelWidth;
 
-    // Cache pointers to LED array and bitmask array, to avoid repeated accesses
-    const byte* ledsDirty = _ledsDirty;
     const CRGB* ledBuffer = _ledBuffer;
 
-    //while(!previousBufferFree) delay(1);   // experimental - Wait before we allow any writing to the buffer. Stop flicker.
-
     size_t pix = 0; // running pixel index
-    for (int y=0; y<height; y++) for (int x=0; x<width; x++) {
-      if (getBitFromArray(ledsDirty, pix) == true) {        // only repaint the "dirty"  pixels
-        #ifndef NO_CIE1931
-        uint32_t c = uint32_t(ledBuffer[pix]) & 0x00FFFFFF; // get RGB color, removing FastLED "alpha" component 
-        c = unGamma24(c); // to use the driver linear brightness feature, we first need to undo WLED gamma correction
-        uint8_t r = R(c);
-        uint8_t g = G(c);
-        uint8_t b = B(c);
-        #else
-        const CRGB c = ledBuffer[pix];  // we stay on CRGB, instead of packing/unpacking the color value to uint32_t
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        const CRGB c = ledBuffer[pix]; // Get the color for the current pixel
         uint8_t r = c.r;
         uint8_t g = c.g;
         uint8_t b = c.b;
-        #endif
-        if (isFourScan) fourScanPanel->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
-        else display->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
+
+        if (isFourScan) {
+          fourScanPanel->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
+        } else {
+          display->drawPixelRGB888(int16_t(x), int16_t(y), r, g, b);
+        }
+        pix++;
       }
-      pix ++;
     }
-    setBitArray(_ledsDirty, _len, false);  // buffer shown - reset all dirty bits
+
+    // No need to reset the dirty bits since all pixels are written
   }
 }
 
